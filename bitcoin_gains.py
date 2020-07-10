@@ -258,6 +258,44 @@ class CsvParser(TransactionParser):
     def finish(self):
         return ()
 
+class BisqParser(CsvParser):
+    expected_header = 'Trade ID,Date/Time,Market,Price,Amount in BTC,Amount,Transaction Fee,Maker Fee,Buyer Deposit,Seller Deposit,Offer type,Status'
+
+    def parse_row(self, row):
+        trade_id, timestamp, market, price, btc, usd, tx_fee, maker_fee, _, _, offer_type, status = row
+
+        timestamp = time.strptime(timestamp, '%b %d, %Y %I:%M:%S %p')
+
+        if status == 'Canceled':
+            return None
+        elif status == 'Completed':
+            pass
+        else:
+            raise ValueError, status
+
+        if offer_type == 'Sell BTC':
+            btc = '-' + btc
+        elif offer_type == 'Buy BTC':
+            usd = '-' + usd
+        else:
+            raise ValueError, offer_type
+
+        if market == 'BTC/USD' and usd.endswith(' USD'):
+            usd = usd[:-len(' USD')]
+        elif market.startswith('BTC/'):
+            usd = None
+            price = None
+        else:
+            raise ValueError, market
+
+        # TODO: Include maker fee.  Not clear how to infer from the Bisq CSV
+        # whether the maker fee was paid by the user or the counterparty.
+        # We set account='bitcoind' to work around Bisq not reporting
+        # deposits/withdrawals.
+        return Transaction(timestamp, 'trade', btc, usd, price=price,
+                           fee_btc=tx_fee, id='Bisq:%s' % trade_id,
+                           account='bitcoind')
+
 class BitstampParser(CsvParser):
     expected_header = 'Type,Datetime,BTC,USD,BTC Price,FEE,Sub Type'
 
@@ -1090,6 +1128,7 @@ def main(args):
         max_timestamp = float('inf'),
 
     parsers = [
+      BisqParser(),
       BitstampParser(),
       BitstampParser2(),
       MtGoxParser(),
